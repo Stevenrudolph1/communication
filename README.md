@@ -42,18 +42,36 @@ External communications: articles, newsletters, partner announcements, practitio
 ```
 communication/
 ├── substack/
-│   ├── articles/                  ← Drafted content
-│   ├── images/                    ← OpenAI-generated (24 styles)
-│   ├── editorial-calendar.md
+│   ├── drafts/                    ← Drafted content
+│   ├── reviewed/                  ← Steven-reviewed articles
+│   ├── published/                 ← Published articles
+│   ├── archive/                   ← Older/superseded drafts
+│   ├── article-seeds/             ← Raw article ideas and seeds
+│   ├── source-index/              ← Source tracking
+│   ├── publish-info/              ← Publishing metadata
+│   ├── images/                    ← Generated images
+│   ├── assets/                    ← Other Substack assets
+│   ├── EDITORIAL-CALENDAR-24.md
 │   ├── SUBSTACK-PUBLISHING-CANON.md
-│   └── GENERATION-PROCESS.md
+│   ├── GENERATION-PROCESS.md
+│   ├── produce-article.py         ← Article producer (content-system pipeline)
+│   ├── generate-article.sh
+│   ├── generate-image.py
+│   ├── generate-shriya-calendar.py
+│   └── sync-from-substack.py
+├── linkedin/
+│   ├── articles/                  ← LinkedIn article content
+│   ├── linkedin-article-generator/ ← Generator pipeline
+│   └── LINKEDIN-ARTICLES-PLAN.md
 ├── mailerlite/
-│   ├── list-segments/
-│   └── templates/
+│   ├── campaigns/                 ← Email campaigns
+│   ├── sent/                      ← Sent campaign records
+│   └── templates/                 ← Email templates
+├── xavimail/                      ← Substack state tracking and checks
 ├── Partners/
 │   └── [partner-specific materials]
-├── [email campaigns]
-└── [announcements]
+├── _unsorted/                     ← Unsorted legacy files
+└── README.md
 ```
 
 ## Content Governance
@@ -78,9 +96,20 @@ communication/
 | Elena Z | Latvia | Practitioner (strong contender) | To cultivate |
 | Sacha | France | Revenue partner (~$25K/yr) | Stable |
 
+## Content System Pipeline
+
+All content production flows through the content-system pipeline. Every article, social post, or newsletter traces to an approved kernel.
+
+- **Architecture**: `~/Projects/content-system/CONTENT-SYSTEM-ARCHITECTURE.md`
+- **Flow**: Sources -> Insight Engine -> Insight Gate (15/20) -> Kernel Store -> Brief Builder -> Producer -> Ledger
+- **Substack producer**: `communication/substack/produce-article.py`
+- **LinkedIn producer**: `marketing/linkedin-article-generator/pipeline.py`
+- **Kernel lookup**: `python3 content-system/builders/brief-builder.py --list`
+
 ## Reference
 
-- **Content voice**: `planning/governance/production/GOV-06-brand-voice.md`
-- **Publishing workflow**: `planning/governance/production/` (PUB 01-20)
+- **Content voice**: `knowledge/governance/GOV-06-brand-voice.md`
+- **Writing method**: `knowledge/governance/GOV-14-writing-method.md`
+- **Publishing workflow**: `books/_canon/publishing-canon/` (PUB 01-20)
 - **Marketing automation**: `marketing/SOCIAL-MEDIA-AUTOMATION-PLAN.md`
 - **Product funnel**: `marketing/PRODUCT-FUNNEL-AND-PRACTITIONER-PATHWAY.md`
