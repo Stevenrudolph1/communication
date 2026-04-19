@@ -68,9 +68,20 @@ def init(conn: sqlite3.Connection):
             status     TEXT DEFAULT 'sent'
         );
 
+        CREATE TABLE IF NOT EXISTS sequence_sends (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            sequence     TEXT NOT NULL,
+            step_num     INTEGER NOT NULL,
+            list_name    TEXT NOT NULL,
+            send_id      INTEGER,
+            sent_at      TEXT DEFAULT (datetime('now')),
+            UNIQUE(sequence, step_num, list_name)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_list_members_list ON list_members(list_id);
         CREATE INDEX IF NOT EXISTS idx_send_log_send ON send_log(send_id);
         CREATE INDEX IF NOT EXISTS idx_send_log_email ON send_log(email);
+        CREATE INDEX IF NOT EXISTS idx_sequence_sends ON sequence_sends(sequence, step_num);
     """)
     conn.commit()
 
@@ -218,3 +229,32 @@ def already_sent(send_id: int, email: str) -> bool:
         'SELECT 1 FROM send_log WHERE send_id = ? AND email = ?', (send_id, email)
     ).fetchone()
     return row is not None
+
+
+# ── Sequence tracking ─────────────────────────────────────────────────────────
+
+def sequence_step_sent(sequence: str, step_num: int, list_name: str) -> dict | None:
+    """Return the sequence_sends row if this step was already sent, else None."""
+    row = _db().execute(
+        'SELECT * FROM sequence_sends WHERE sequence=? AND step_num=? AND list_name=?',
+        (sequence, step_num, list_name)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def record_sequence_send(sequence: str, step_num: int, list_name: str, send_id: int):
+    db = _db()
+    db.execute("""
+        INSERT INTO sequence_sends (sequence, step_num, list_name, send_id)
+        VALUES (?, ?, ?, ?)
+    """, (sequence, step_num, list_name, send_id))
+    db.commit()
+
+
+def get_sequence_history(sequence: str) -> list[dict]:
+    rows = _db().execute("""
+        SELECT step_num, list_name, sent_at, send_id
+        FROM sequence_sends WHERE sequence=?
+        ORDER BY step_num, list_name
+    """, (sequence,)).fetchall()
+    return [dict(r) for r in rows]

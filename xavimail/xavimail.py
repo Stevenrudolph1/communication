@@ -27,6 +27,7 @@ import config as cfg_mod
 import db
 import sync as sync_mod
 import send as send_mod
+import sequence as seq_mod
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -211,6 +212,83 @@ def cmd_sync(args):
         die(str(e))
 
 
+def cmd_sequence(args):
+    sub = args.seq_command
+
+    if sub == 'list':
+        seqs = seq_mod.list_sequences()
+        if not seqs:
+            print('No sequences yet. Add a .yaml file to sequences/.')
+            return
+        for s in seqs:
+            name = s.get('name', '?')
+            desc = s.get('description', '')
+            nxt = seq_mod.next_step(s)
+            nxt_label = f'next: step {nxt}' if nxt else 'complete'
+            steps = len(s.get('steps', []))
+            print(f'{name:<35}  {steps} steps  {nxt_label:<18}  {desc}')
+
+    elif sub == 'status':
+        seq = seq_mod.load_sequence(args.name)
+        rows = seq_mod.sequence_status(seq)
+        print(f'Sequence: {seq["name"]}')
+        if seq.get('description'):
+            print(f'          {seq["description"]}')
+        print()
+        last_step = None
+        for r in rows:
+            if r['num'] != last_step:
+                print(f'  Step {r["num"]}')
+                last_step = r['num']
+            status = f'✓ sent {r["sent_at"][:10]}' if r['sent_at'] else '○ pending'
+            subject = r['subject'] or '(no subject in frontmatter)'
+            print(f'    [{r["alias"]}] {r["list_name"]:<25}  {status:<20}  {subject}')
+
+    elif sub == 'next':
+        seq = seq_mod.load_sequence(args.name)
+        nxt = seq_mod.next_step(seq)
+        if nxt is None:
+            print(f'Sequence "{args.name}" is complete — all steps sent.')
+            return
+        print(f'Next unsent step: {nxt}')
+        print()
+        seq_mod.send_step(seq, nxt, list_filter=args.list, dry_run=True)
+
+    elif sub == 'send':
+        seq = seq_mod.load_sequence(args.name)
+
+        step_num = args.step
+        if step_num is None:
+            step_num = seq_mod.next_step(seq)
+            if step_num is None:
+                print(f'Sequence "{args.name}" is complete — all steps sent.')
+                print('Use --step N to force-send a specific step.')
+                return
+
+        # Always show dry run first
+        print(f'─── Dry run: sequence={args.name}  step={step_num} ───')
+        seq_mod.send_step(seq, step_num, list_filter=args.list, dry_run=True)
+        print()
+
+        if args.dry_run:
+            return
+
+        # Confirmation prompt
+        if not args.confirm:
+            try:
+                answer = input('Send for real? [y/N] ').strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print('\nAborted.')
+                return
+            if answer != 'y':
+                print('Aborted.')
+                return
+
+        print()
+        print(f'─── Sending: sequence={args.name}  step={step_num} ───')
+        seq_mod.send_step(seq, step_num, list_filter=args.list, dry_run=False)
+
+
 def cmd_stats(args):
     sends = db.get_sends(limit=20)
     suppressions = db.get_suppressions()
@@ -285,6 +363,26 @@ def main():
     # sync
     sub.add_parser('sync', help='Pull unsubscribes/bounces from D1 into local DB')
 
+    # sequence
+    p_seq = sub.add_parser('sequence', help='Manage and send sequences')
+    seq_sub = p_seq.add_subparsers(dest='seq_command', metavar='subcommand')
+
+    seq_sub.add_parser('list', help='List all sequences with progress')
+
+    p_sstat = seq_sub.add_parser('status', help='Step-by-step send history for a sequence')
+    p_sstat.add_argument('name', help='Sequence name')
+
+    p_snext = seq_sub.add_parser('next', help='Dry run of the next unsent step')
+    p_snext.add_argument('name', help='Sequence name')
+    p_snext.add_argument('--list', default=None, metavar='ALIAS', help='en or fr only')
+
+    p_ssend = seq_sub.add_parser('send', help='Send the next step (or a specific step)')
+    p_ssend.add_argument('name', help='Sequence name')
+    p_ssend.add_argument('--step',    type=int, default=None, help='Override which step to send')
+    p_ssend.add_argument('--list',    default=None, metavar='ALIAS', help='en or fr only')
+    p_ssend.add_argument('--dry-run', action='store_true', help='Preview only')
+    p_ssend.add_argument('--confirm', action='store_true', help='Skip the y/N prompt')
+
     # stats
     sub.add_parser('stats', help='Send history and suppression counts')
 
@@ -303,6 +401,7 @@ def main():
         'import':   cmd_import,
         'send':     cmd_send,
         'sync':     cmd_sync,
+        'sequence': cmd_sequence,
         'stats':    cmd_stats,
     }
 

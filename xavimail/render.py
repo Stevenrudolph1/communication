@@ -17,6 +17,34 @@ def load_body(path: str) -> str:
     return p.read_text(encoding='utf-8')
 
 
+def parse_frontmatter(text: str) -> tuple[dict, str]:
+    """
+    Extract YAML frontmatter from email file.
+    Returns (meta_dict, body_without_frontmatter).
+    Supported keys: subject
+    """
+    meta = {}
+    if not text.startswith('---'):
+        return meta, text
+    end = text.find('\n---', 3)
+    if end == -1:
+        return meta, text
+    block = text[3:end].strip()
+    for line in block.splitlines():
+        if ':' in line:
+            key, _, val = line.partition(':')
+            meta[key.strip()] = val.strip()
+    body = text[end + 4:].lstrip('\n')
+    return meta, body
+
+
+def subject_from_file(path: str) -> str | None:
+    """Return the subject line from a file's frontmatter, or None."""
+    raw = load_body(path)
+    meta, _ = parse_frontmatter(raw)
+    return meta.get('subject')
+
+
 def apply_context(text: str, context: dict) -> str:
     for key, value in context.items():
         text = text.replace('{' + key + '}', str(value or ''))
@@ -147,8 +175,10 @@ def render(body_path: str, context: dict) -> tuple[str, str]:
     """
     Render an email body file into (plain_text, html) with context applied.
     Context should include: first_name, last_name, email, unsubscribe_url.
+    Strips YAML frontmatter before rendering.
     """
     raw = load_body(body_path)
+    _, raw = parse_frontmatter(raw)
     raw = apply_context(raw, context)
 
     plain = to_plain_text(raw)

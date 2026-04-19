@@ -1,0 +1,11 @@
+name: practitioners-2026
+description: MN practitioner re-engagement sequence
+
+lists:
+  en: practitioners-en
+  fr: practitioners-fr
+
+steps:
+  - num: 1
+    en: emails/practitioners/en/01.md
+    fr: emails/practitioners/fr/01.md
