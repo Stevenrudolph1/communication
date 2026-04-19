@@ -191,6 +191,8 @@ def send_step(seq: dict, step_num: int, list_filter: str = None,
             body_file=t['file'],
             dry_run=dry_run,
             test_to=None,
+            sequence=seq['name'],
+            step_num=step_num,
         )
 
         if not dry_run:

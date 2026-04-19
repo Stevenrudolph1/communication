@@ -73,7 +73,7 @@ def to_plain_text(md: str) -> str:
 
 
 def to_html(md: str) -> str:
-    """Convert Markdown to minimal HTML for the HTML part."""
+    """Convert Markdown to HTML body content (no wrapper — added by render())."""
     lines = md.split('\n')
     html_lines = []
     in_p = False
@@ -81,7 +81,6 @@ def to_html(md: str) -> str:
     for line in lines:
         stripped = line.strip()
 
-        # Blank line — close paragraph
         if not stripped:
             if in_p:
                 html_lines.append('</p>')
@@ -89,7 +88,6 @@ def to_html(md: str) -> str:
             html_lines.append('')
             continue
 
-        # Headers
         m = re.match(r'^(#{1,6})\s+(.*)', stripped)
         if m:
             if in_p:
@@ -99,7 +97,6 @@ def to_html(md: str) -> str:
             html_lines.append(f'<h{level}>{_inline(m.group(2))}</h{level}>')
             continue
 
-        # Horizontal rule
         if re.match(r'^---+$', stripped):
             if in_p:
                 html_lines.append('</p>')
@@ -107,7 +104,6 @@ def to_html(md: str) -> str:
             html_lines.append('<hr>')
             continue
 
-        # Regular paragraph line
         if not in_p:
             html_lines.append('<p>')
             in_p = True
@@ -118,26 +114,63 @@ def to_html(md: str) -> str:
     if in_p:
         html_lines.append('</p>')
 
-    body = '\n'.join(html_lines)
+    return '\n'.join(html_lines)
 
+
+def _wrap_html(body_content: str, footer_html: str, pixel_html: str = '') -> str:
+    """Wrap rendered body + footer in the full HTML email shell."""
     return f"""<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title></title>
   <style>
-    body {{ font-family: Georgia, 'Times New Roman', serif; max-width: 580px;
-           margin: 0 auto; padding: 24px 16px; color: #222; font-size: 16px; line-height: 1.65; }}
-    p {{ margin: 0 0 1.1em 0; }}
-    h1, h2, h3 {{ font-weight: bold; margin: 1.4em 0 0.4em 0; }}
-    a {{ color: #333; }}
-    hr {{ border: none; border-top: 1px solid #ddd; margin: 1.5em 0; }}
-    .footer {{ margin-top: 2em; padding-top: 1em; border-top: 1px solid #eee;
-               font-size: 0.8em; color: #888; }}
+    body {{
+      margin: 0; padding: 0;
+      background-color: #f4f4f4;
+      font-family: Georgia, 'Times New Roman', serif;
+      color: #1a1a1a;
+    }}
+    .wrapper {{
+      max-width: 580px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      padding: 40px 40px 32px 40px;
+    }}
+    p {{
+      margin: 0 0 1.25em 0;
+      font-size: 16px;
+      line-height: 1.75;
+      color: #1a1a1a;
+    }}
+    h1 {{ font-size: 24px; font-weight: bold; margin: 1.6em 0 0.5em 0; color: #1a1a1a; }}
+    h2 {{ font-size: 20px; font-weight: bold; margin: 1.5em 0 0.5em 0; color: #1a1a1a; }}
+    h3 {{ font-size: 17px; font-weight: bold; margin: 1.4em 0 0.4em 0; color: #1a1a1a; }}
+    a {{ color: #1a1a1a; text-decoration: underline; }}
+    hr {{ border: none; border-top: 1px solid #e8e8e8; margin: 1.8em 0; }}
+    .footer {{
+      margin-top: 2em;
+      padding-top: 1em;
+      border-top: 1px solid #e8e8e8;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12px;
+      color: #999999;
+      line-height: 1.5;
+    }}
+    .footer a {{ color: #999999; }}
+    @media (max-width: 620px) {{
+      .wrapper {{ padding: 24px 20px 20px 20px; }}
+    }}
   </style>
 </head>
 <body>
-{body}
+<div class="wrapper">
+{body_content}
+{footer_html}
+</div>
+{pixel_html}
 </body>
 </html>"""
 
@@ -157,36 +190,98 @@ def _inline(text: str) -> str:
     return text
 
 
-UNSUBSCRIBE_FOOTER_PLAIN = """
-─────────────────────────
-You're receiving this because you're a trained MN practitioner.
-To unsubscribe: {unsubscribe_url}
-"""
+UNSUBSCRIBE_FOOTER_PLAIN = (
+    '\n─────────────────────────\n'
+    "You're receiving this because you're a trained MN practitioner.\n"
+    'To unsubscribe: {unsubscribe_url}\n'
+)
 
-UNSUBSCRIBE_FOOTER_HTML = """
-<div class="footer">
-  You're receiving this because you're a trained MN practitioner.
-  <a href="{unsubscribe_url}">Unsubscribe</a>
-</div>
-"""
+_FOOTER_HTML_TMPL = (
+    '<div class="footer">'
+    "You're receiving this because you're a trained MN practitioner. &nbsp;"
+    '<a href="{unsubscribe_url}">Unsubscribe</a>'
+    '</div>'
+)
 
 
-def render(body_path: str, context: dict) -> tuple[str, str]:
+def render(body_path: str, context: dict,
+           send_id: int = None, api_base: str = None,
+           mailer_secret: str = None) -> tuple[str, str]:
     """
-    Render an email body file into (plain_text, html) with context applied.
-    Context should include: first_name, last_name, email, unsubscribe_url.
-    Strips YAML frontmatter before rendering.
+    Render an email body into (plain_text, html).
+
+    send_id / api_base / mailer_secret — when provided, injects open-tracking
+    pixel and rewrites links through click tracker.
     """
     raw = load_body(body_path)
     _, raw = parse_frontmatter(raw)
     raw = apply_context(raw, context)
 
+    # Plain text
     plain = to_plain_text(raw)
-    plain += UNSUBSCRIBE_FOOTER_PLAIN.format(unsubscribe_url=context.get('unsubscribe_url', ''))
+    plain += UNSUBSCRIBE_FOOTER_PLAIN.format(
+        unsubscribe_url=context.get('unsubscribe_url', '')
+    )
 
-    html_body = to_html(raw)
-    footer_html = UNSUBSCRIBE_FOOTER_HTML.format(unsubscribe_url=context.get('unsubscribe_url', ''))
-    # Insert footer before closing </body>
-    html_body = html_body.replace('</body>', footer_html + '\n</body>')
+    # HTML body content
+    body_content = to_html(raw)
 
-    return plain, html_body
+    # Tracking: rewrite links and add open pixel when send_id is available
+    pixel_html = ''
+    if send_id and api_base and mailer_secret:
+        email = context.get('email', '')
+        body_content = _rewrite_links(body_content, send_id, email,
+                                      api_base, mailer_secret,
+                                      context.get('unsubscribe_url', ''))
+        pixel_html = _open_pixel(send_id, email, api_base, mailer_secret)
+
+    footer_html = _FOOTER_HTML_TMPL.format(
+        unsubscribe_url=context.get('unsubscribe_url', '')
+    )
+
+    html = _wrap_html(body_content, footer_html, pixel_html)
+    return plain, html
+
+
+# ── Tracking helpers ─────────────────────────────────────────────────────────
+
+import hashlib
+import hmac as _hmac
+import urllib.parse as _urlparse
+
+
+def _track_sig(action: str, send_id: int, email: str, secret: str,
+               url: str = '') -> str:
+    msg = f'{action}:{send_id}:{email.lower()}'
+    if url:
+        msg += f':{url}'
+    return _hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
+
+
+def _open_pixel(send_id: int, email: str, api_base: str, secret: str) -> str:
+    sig = _track_sig('open', send_id, email, secret)
+    params = _urlparse.urlencode({'sid': send_id, 'email': email.lower(), 'sig': sig})
+    url = f'{api_base.rstrip("/")}/mailer/track/open?{params}'
+    return f'<img src="{url}" width="1" height="1" alt="" style="display:none">'
+
+
+def _rewrite_links(html: str, send_id: int, email: str,
+                   api_base: str, secret: str, unsub_url: str) -> str:
+    """Rewrite <a href="..."> through click tracker, skip unsubscribe + mailto."""
+    base = api_base.rstrip('/')
+
+    def rewrite(match):
+        original = match.group(1)
+        if (original.startswith('mailto:') or
+                original.startswith('#') or
+                '/mailer/unsubscribe' in original or
+                '/mailer/track/' in original):
+            return match.group(0)
+        sig = _track_sig('click', send_id, email, secret, url=original)
+        params = _urlparse.urlencode({
+            'sid': send_id, 'email': email.lower(),
+            'url': original, 'sig': sig,
+        })
+        return f'href="{base}/mailer/track/click?{params}"'
+
+    return re.sub(r'href="([^"]+)"', rewrite, html)

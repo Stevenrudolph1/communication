@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import config as cfg_mod
 import db
+import render as render_mod
 import sync as sync_mod
 import send as send_mod
 import sequence as seq_mod
@@ -47,6 +48,110 @@ def require_list(name: str) -> dict:
 
 # ── Commands ──────────────────────────────────────────────────────────────────
 
+def cmd_help(args):
+    print("""
+XaviMail — self-hosted email tool
+Sends via AWS SES · Lists in SQLite · Unsubscribes/bounces via Cloudflare D1
+
+━━━ LIST MANAGEMENT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  xavimail lists
+      Show all lists with subscriber counts.
+
+  xavimail list <name>
+      Show all subscribers in a list with status.
+
+  xavimail list <name> --attribs
+      Show subscribers with country, cert level, test count instead of status.
+
+  xavimail add <email> <list> [--name "First Last"]
+      Add a subscriber to a list.
+
+  xavimail remove <email> <list>
+      Remove a subscriber from a list (hard delete).
+
+  xavimail suppress <email> [--reason bounce|complaint|manual]
+      Globally suppress an address (excluded from all future sends).
+
+━━━ SENDING ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  xavimail preview <body.md>
+      Render email to HTML and open in browser. No send.
+
+  xavimail test <list> "<subject>" <body.md>
+      Send to yourself only (steven@multiplenatures.com). Inbox check.
+      Tracking (open/click) is live so you can verify it works.
+
+  xavimail send <list> "<subject>" <body.md>
+      Send campaign to all active members of a list.
+
+  xavimail send <list> "<subject>" <body.md> --dry-run
+      Preview recipient list and rendered email. No send.
+
+  xavimail send <list> "<subject>" <body.md> --test-to <email>
+      Send to one specific address only.
+
+  Standard send workflow:
+      xavimail sync
+      xavimail preview email.md
+      xavimail test practitioners-en "Subject" email.md
+      xavimail send practitioners-en "Subject" email.md
+
+━━━ SEQUENCES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  xavimail sequence list
+      List all sequences with step count and progress.
+
+  xavimail sequence status <name>
+      Step-by-step send history for a sequence.
+
+  xavimail sequence next <name> [--list en|fr]
+      Dry run of the next unsent step.
+
+  xavimail sequence send <name> [--step N] [--list en|fr] [--dry-run] [--confirm]
+      Send the next step (shows dry run first, prompts y/N).
+
+━━━ DATA & SYNC ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  xavimail sync
+      Pull suppressions + tracking events from Cloudflare D1 into local DB.
+      Run before every send and after test sends to see open/click events.
+
+  xavimail import [--list practitioners-en|practitioners-fr]
+      Import from contacts.json (full re-import, idempotent).
+
+  xavimail import --sync [--list ...]
+      Diff-based import: adds new contacts, updates attribs, skips existing.
+
+  xavimail stats
+      Send history (last 20) and suppression counts by reason.
+
+━━━ EMAIL FILE FORMAT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  emails/my-email.md:
+
+    ---
+    subject: Your subject line here
+    ---
+    Hi {first_name},
+
+    Body text here. [Links](https://example.com) are tracked automatically.
+
+    Steven
+
+  Variables: {first_name}  {last_name}  {email}  {unsubscribe_url}
+  See EMAIL-DESIGN-SPEC.md for full formatting guide.
+
+━━━ FILES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Config:     ~/.xavimail/config.json
+  Database:   ~/.xavimail/xavimail.db
+  Sequences:  sequences/*.yaml
+  Emails:     emails/**/*.md
+  Design:     EMAIL-DESIGN-SPEC.md
+""")
+
+
 def cmd_lists(args):
     lists = db.get_lists()
     if not lists:
@@ -59,22 +164,51 @@ def cmd_lists(args):
 
 
 def cmd_list(args):
+    import json as _json
+
     lst = require_list(args.name)
     members = db.get_list_members(lst['id'])
-    suppressions = {s['email'] for s in db.get_suppressions()}
+    suppressions = {s['email']: s['reason'] for s in db.get_suppressions()}
 
     if not members:
         print(f'List "{args.name}" is empty.')
         return
 
+    show_attribs = getattr(args, 'attribs', False)
     print(f'List: {args.name}  ({len(members)} total)')
     print()
-    print(f'  {"Email":<40}  {"Name":<25}  Status')
-    print('  ' + '─' * 80)
-    for m in members:
-        name = f"{m['first_name']} {m['last_name']}".strip() or '—'
-        status = '⚠ suppressed' if m['email'] in suppressions else 'active'
-        print(f'  {m["email"]:<40}  {name:<25}  {status}')
+
+    if show_attribs:
+        print(f'  {"Email":<40}  {"Name":<25}  {"Attribs"}')
+        print('  ' + '─' * 100)
+        for m in members:
+            name = f"{m['first_name']} {m['last_name']}".strip() or '—'
+            try:
+                attribs = _json.loads(m.get('attribs') or '{}')
+            except Exception:
+                attribs = {}
+            parts = []
+            if attribs.get('country'):    parts.append(attribs['country'])
+            if attribs.get('cert_level'): parts.append(attribs['cert_level'])
+            if attribs.get('mntest_count'): parts.append(f"{attribs['mntest_count']} tests")
+            if attribs.get('segment'):    parts.append(attribs['segment'])
+            attrib_str = '  ·  '.join(parts) if parts else '—'
+            print(f'  {m["email"]:<40}  {name:<25}  {attrib_str}')
+    else:
+        print(f'  {"Email":<40}  {"Name":<25}  Status')
+        print('  ' + '─' * 80)
+        for m in members:
+            name = f"{m['first_name']} {m['last_name']}".strip() or '—'
+            if m['email'] in suppressions:
+                reason = suppressions[m['email']]
+                status = f'⚠ {reason} (global)'
+            elif m.get('list_status', 'active') != 'active':
+                status = f'⚠ {m["list_status"]} (this list)'
+            elif m.get('subscriber_status', 'active') != 'active':
+                status = f'⚠ {m["subscriber_status"]}'
+            else:
+                status = 'active'
+            print(f'  {m["email"]:<40}  {name:<25}  {status}')
 
     active = len(members) - sum(1 for m in members if m['email'] in suppressions)
     print()
@@ -110,19 +244,39 @@ def cmd_suppress(args):
     print(f'✓ {email} suppressed (reason: {reason})')
 
 
+def _extract_contact_attribs(contact: dict) -> dict:
+    attribs = {}
+    if contact.get('country'):  attribs['country']  = contact['country']
+    if contact.get('category'): attribs['category'] = contact['category']
+    if contact.get('segment'):  attribs['segment']  = contact['segment']
+    pd = contact.get('practitioner_data') or {}
+    if pd.get('cert_level'):         attribs['cert_level']  = pd['cert_level']
+    if pd.get('mntest_count_total'): attribs['mntest_count'] = pd['mntest_count_total']
+    return attribs
+
+
+def _parse_contact_name(contact: dict) -> tuple[str, str]:
+    name_raw = (contact.get('name') or '').strip()
+    last_raw = (contact.get('last_name') or '').strip()
+    first_name, last_name = name_raw, last_raw
+    if not last_name and ' ' in first_name:
+        parts = first_name.rsplit(' ', 1)
+        first_name, last_name = parts[0], parts[1]
+    return first_name, last_name
+
+
 def cmd_import(args):
     """Import practitioners from contacts.json into XaviMail lists."""
+    import json as _json
+
     cfg = cfg_mod.load()
     contacts_path = Path(cfg['contacts_json'])
     if not contacts_path.exists():
         die(f'contacts.json not found at {contacts_path}')
 
-    import json
-    data = json.loads(contacts_path.read_text())
-    contacts = data.get('contacts', {})
+    data = _json.loads(contacts_path.read_text())
+    contacts = data.get('contacts', data) if isinstance(data, dict) else data
 
-    # EN list: non-french-practitioner
-    # FR list: french-active + french-inactive (combined)
     lists_to_import = {
         'practitioners-en': ['non-french-practitioner'],
         'practitioners-fr': ['french-active', 'french-inactive'],
@@ -138,8 +292,16 @@ def cmd_import(args):
         'practitioners-fr': 'Praticiens MN (Français, actifs + inactifs)',
     }
 
-    total_added = 0
-    total_skipped = 0
+    is_sync = getattr(args, 'sync', False)
+    total_added = total_updated = total_skipped = total_suppressed = 0
+
+    # Pre-load current state for diff (sync mode)
+    existing_emails = set()
+    existing_list_emails = {}
+    suppressed_emails = {s['email'] for s in db.get_suppressions()}
+    if is_sync:
+        for sub in db._db().execute('SELECT email FROM subscribers').fetchall():
+            existing_emails.add(sub[0])
 
     for list_name, segments in lists_to_import.items():
         lst = db.get_list_by_name(list_name)
@@ -147,7 +309,11 @@ def cmd_import(args):
             lst = db.create_list(list_name, descriptions.get(list_name, ''))
             print(f'Created list: {list_name}')
 
-        added = skipped = 0
+        if is_sync:
+            members = {m['email'] for m in db.get_list_members(lst['id'])}
+            existing_list_emails[list_name] = members
+
+        added = updated = skipped = suppressed = 0
         for contact in contacts:
             email = (contact.get('email') or '').lower().strip()
             if not email:
@@ -158,33 +324,98 @@ def cmd_import(args):
                 continue
 
             status = contact.get('status', '')
-            if status == 'unsubscribed':
-                # Already unsubscribed in MailerLite — suppress them
-                db.add_suppression(email, 'unsubscribe')
+
+            # Handle suppressible statuses
+            if status in ('unsubscribed', 'bounced', 'junk'):
+                reason = {'unsubscribed': 'unsubscribe', 'bounced': 'bounce', 'junk': 'complaint'}.get(status, 'unsubscribe')
+                if email not in suppressed_emails:
+                    db.add_suppression(email, reason)
+                    suppressed_emails.add(email)
+                    suppressed += 1
+                else:
+                    skipped += 1
+                continue
+
+            # Skip already-suppressed
+            if email in suppressed_emails:
                 skipped += 1
                 continue
 
-            name_raw = contact.get('name', '') or ''
-            last_raw = contact.get('last_name', '') or ''
+            first_name, last_name = _parse_contact_name(contact)
+            attribs = _extract_contact_attribs(contact)
 
-            # contacts.json stores full name in 'name' for some entries
-            first_name = name_raw.strip()
-            last_name = last_raw.strip()
-            if not last_name and ' ' in first_name:
-                parts = first_name.rsplit(' ', 1)
-                first_name, last_name = parts[0], parts[1]
+            if is_sync and email in existing_emails:
+                # Update attribs only — don't clobber names if already set
+                db.upsert_subscriber(email, first_name, last_name, status='active', attribs=attribs)
+                if list_name in existing_list_emails and email not in existing_list_emails[list_name]:
+                    db.add_to_list(lst['id'], email)
+                    added += 1
+                else:
+                    updated += 1
+            else:
+                db.upsert_subscriber(email, first_name, last_name, status='active', attribs=attribs)
+                db.add_to_list(lst['id'], email)
+                if is_sync:
+                    existing_emails.add(email)
+                added += 1
 
-            db.upsert_subscriber(email, first_name, last_name)
-            db.add_to_list(lst['id'], email)
-            added += 1
-
-        print(f'{list_name}: {added} added, {skipped} already unsubscribed (suppressed)')
+        if is_sync:
+            print(f'{list_name}: {added} new, {updated} updated, {skipped} skipped, {suppressed} newly suppressed')
+        else:
+            print(f'{list_name}: {added} added, {skipped + suppressed} skipped/suppressed')
         total_added += added
+        total_updated += updated
         total_skipped += skipped
+        total_suppressed += suppressed
 
     print()
-    print(f'Import complete. Total added: {total_added}, suppressed: {total_skipped}')
+    if is_sync:
+        print(f'Sync complete. New: {total_added}  Updated: {total_updated}  Suppressed: {total_suppressed}  Skipped: {total_skipped}')
+    else:
+        print(f'Import complete. Total added: {total_added}, suppressed: {total_suppressed}')
     print('Run `xavimail lists` to confirm.')
+
+
+def cmd_preview(args):
+    """Render email to HTML and open in browser. No send."""
+    import json, subprocess
+    cfg = cfg_mod.load()
+    body_path = Path(args.body).expanduser()
+    if not body_path.exists():
+        die(f'Body file not found: {args.body}')
+
+    # Use a realistic preview context
+    context = {
+        'first_name': 'Steven',
+        'last_name': '',
+        'email': cfg['from_email'],
+        'unsubscribe_url': f"{cfg['unsubscribe_base']}?email={cfg['from_email']}&sig=preview",
+    }
+    _, html = render_mod.render(body_path, context)
+    out = Path('/tmp/xavimail-preview.html')
+    out.write_text(html, encoding='utf-8')
+    subprocess.run(['open', str(out)])
+    print(f'✓ Preview opened in browser ({out})')
+
+
+def cmd_test(args):
+    """Send email to yourself only. Quick inbox check before real send."""
+    cfg = cfg_mod.load()
+    body_path = Path(args.body).expanduser()
+    if not body_path.exists():
+        die(f'Body file not found: {args.body}')
+
+    to = cfg['from_email']
+    result = send_mod.run_campaign(
+        list_name=args.list,
+        subject=args.subject,
+        body_file=str(body_path),
+        dry_run=False,
+        test_to=to,
+    )
+    send_id = result.get('send_id')
+    if send_id:
+        print(f'  send_id={send_id} — run `xavimail sync` after opening to see tracking events.')
 
 
 def cmd_send(args):
@@ -193,9 +424,51 @@ def cmd_send(args):
     if not Path(args.body).expanduser().exists():
         die(f'Body file not found: {args.body}')
 
+    is_live = not args.dry_run and not args.test_to
+
+    # Guard: full list sends require --live flag + interactive confirmation
+    if is_live and not args.live:
+        print()
+        print('  ✋  LIVE SEND BLOCKED')
+        print(f'     List:    {args.list}')
+        print(f'     Subject: {args.subject}')
+        print()
+        print('  To send to the real list you must add --live and confirm.')
+        print('  To test first:  xavimail send <list> <subject> <body> --test-to you@email.com')
+        print('  To preview:     xavimail send <list> <subject> <body> --dry-run')
+        print()
+        sys.exit(1)
+
+    if is_live and args.live:
+        # Count recipients before asking
+        conn = db.get_connection()
+        count = conn.execute(
+            "SELECT COUNT(*) FROM list_members lm "
+            "JOIN subscribers s ON s.id = lm.subscriber_id "
+            "LEFT JOIN suppressions sup ON sup.email = s.email "
+            "WHERE lm.list_name = ? AND s.active = 1 AND sup.email IS NULL",
+            (args.list,)
+        ).fetchone()[0]
+        conn.close()
+        print()
+        print(f'  ⚠️   LIVE SEND — {count} recipients on {args.list}')
+        print(f'  Subject: {args.subject}')
+        print()
+        confirm = input(f'  Type the list name to confirm: ').strip()
+        if confirm != args.list:
+            print('  Cancelled — list name did not match.')
+            print()
+            sys.exit(1)
+        print()
+
+    # Auto-prefix [TEST] on test sends
+    subject = args.subject
+    if args.test_to and not subject.startswith('[TEST]'):
+        subject = f'[TEST] {subject}'
+
     result = send_mod.run_campaign(
         list_name=args.list,
-        subject=args.subject,
+        subject=subject,
         body_file=args.body,
         dry_run=args.dry_run,
         test_to=args.test_to,
@@ -204,10 +477,11 @@ def cmd_send(args):
 
 
 def cmd_sync(args):
-    print('Syncing suppressions from D1...')
+    print('Syncing from D1...')
     try:
         result = sync_mod.pull()
-        print(f'✓ Sync complete. Remote: {result["remote"]}  |  New local: {result["added"]}  |  Total suppressed: {result["total"]}')
+        print(f'✓ Suppressions — remote: {result["remote"]}  new: {result["added"]}  total: {result["total"]}')
+        print(f'✓ Events       — new: {result["new_events"]}')
     except RuntimeError as e:
         die(str(e))
 
@@ -307,11 +581,12 @@ def cmd_stats(args):
 
     print(f'Recent sends (last {len(sends)}):')
     print()
-    print(f'  {"Date":<20}  {"List":<22}  {"Sent":>6}  {"Skipped":>8}  Subject')
-    print('  ' + '─' * 90)
+    print(f'  {"Date":<20}  {"List":<22}  {"Sent":>6}  {"Skipped":>8}  {"Sequence/Step":<18}  Subject')
+    print('  ' + '─' * 110)
     for s in sends:
         date = s['sent_at'][:16].replace('T', ' ')
-        print(f'  {date:<20}  {s["list_name"]:<22}  {s["recipient_count"]:>6}  {s["skipped_count"]:>8}  {s["subject"]}')
+        seq_label = f'{s["sequence"]} #{s["step_num"]}' if s.get('sequence') else '—'
+        print(f'  {date:<20}  {s["list_name"]:<22}  {s["recipient_count"]:>6}  {s["skipped_count"]:>8}  {seq_label:<18}  {s["subject"]}')
 
 
 # ── Argument parser ───────────────────────────────────────────────────────────
@@ -324,12 +599,16 @@ def main():
     )
     sub = parser.add_subparsers(dest='command', metavar='command')
 
+    # help
+    sub.add_parser('help', help='Show full command reference with examples')
+
     # lists
     sub.add_parser('lists', help='Show all lists with subscriber counts')
 
     # list <name>
     p_list = sub.add_parser('list', help='Show subscribers in a list')
     p_list.add_argument('name', help='List name')
+    p_list.add_argument('--attribs', action='store_true', help='Show attribs (country, cert level, test count) instead of status')
 
     # add <email> <list>
     p_add = sub.add_parser('add', help='Add subscriber to a list')
@@ -349,7 +628,18 @@ def main():
 
     # import
     p_imp = sub.add_parser('import', help='Import from contacts.json')
-    p_imp.add_argument('--list', default=None, help='Import only this list (default: all)')
+    p_imp.add_argument('--list',  default=None,  help='Import only this list (default: all)')
+    p_imp.add_argument('--sync',  action='store_true', help='Diff-based: add new, update attribs, skip existing')
+
+    # preview
+    p_prev = sub.add_parser('preview', help='Render email to browser — no send')
+    p_prev.add_argument('body', help='Path to .md email file')
+
+    # test
+    p_test = sub.add_parser('test', help='Send to yourself only (inbox check)')
+    p_test.add_argument('list',    help='List name (for context/subject rendering)')
+    p_test.add_argument('subject', help='Email subject line')
+    p_test.add_argument('body',    help='Path to .md email file')
 
     # send
     p_send = sub.add_parser('send', help='Send a campaign')
@@ -359,6 +649,8 @@ def main():
     p_send.add_argument('--dry-run',  action='store_true', help='Preview only, no sends')
     p_send.add_argument('--test-to',  default=None,  metavar='EMAIL',
                         help='Send only to this address (test mode)')
+    p_send.add_argument('--live',     action='store_true',
+                        help='Required for full list sends — triggers confirmation prompt')
 
     # sync
     sub.add_parser('sync', help='Pull unsubscribes/bounces from D1 into local DB')
@@ -393,12 +685,15 @@ def main():
         sys.exit(0)
 
     dispatch = {
+        'help':     cmd_help,
         'lists':    cmd_lists,
         'list':     cmd_list,
         'add':      cmd_add,
         'remove':   cmd_remove,
         'suppress': cmd_suppress,
         'import':   cmd_import,
+        'preview':  cmd_preview,
+        'test':     cmd_test,
         'send':     cmd_send,
         'sync':     cmd_sync,
         'sequence': cmd_sequence,

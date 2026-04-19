@@ -79,6 +79,8 @@ def run_campaign(
     body_file: str,
     dry_run: bool = False,
     test_to: str = None,
+    sequence: str = None,
+    step_num: int = None,
 ) -> dict:
     """
     Send an email to all active members of a list.
@@ -95,26 +97,38 @@ def run_campaign(
         raise ValueError(f"List '{list_name}' not found. Run 'xavimail lists' to see available lists.")
 
     if test_to:
-        # Single test send
+        # Single test send — log it so tracking works in the test email
         u_url = unsub_url(test_to, cfg)
         ctx = {
-            'first_name': 'Test',
+            'first_name': 'Steven',
             'last_name': '',
             'email': test_to,
             'unsubscribe_url': u_url,
         }
-        plain, html = render_mod.render(body_file, ctx)
         if dry_run:
+            plain, _ = render_mod.render(body_file, ctx)
             print(f'[DRY RUN] Would send to: {test_to}')
             print(f'Subject: {subject}')
             print('─' * 60)
             print(plain[:800])
             return {'sent': 0, 'skipped': 0, 'suppressed': 0, 'errors': 0}
+        test_send_id = db.log_send(
+            list_name=list_name, subject=subject, body_file=body_file,
+            recipient_count=1, skipped_count=0,
+            sequence=sequence, step_num=step_num,
+        )
+        plain, html = render_mod.render(
+            body_file, ctx,
+            send_id=test_send_id,
+            api_base=cfg.get('api_base'),
+            mailer_secret=cfg.get('mailer_secret'),
+        )
         print(f'Sending test to {test_to}...')
         ses = _ses_client(cfg)
         msg_id = send_one(test_to, subject, plain, html, u_url, cfg, ses)
+        db.log_send_item(test_send_id, test_to, msg_id, 'sent')
         print(f'✓ Test sent. MessageId: {msg_id}')
-        return {'sent': 1, 'skipped': 0, 'suppressed': 0, 'errors': 0}
+        return {'sent': 1, 'skipped': 0, 'suppressed': 0, 'errors': 0, 'send_id': test_send_id}
 
     recipients = db.get_active_recipients(lst['id'])
     all_members = db.get_list_members(lst['id'])
@@ -155,6 +169,8 @@ def run_campaign(
         body_file=body_file,
         recipient_count=len(recipients),
         skipped_count=suppressed_count,
+        sequence=sequence,
+        step_num=step_num,
     )
 
     ses = _ses_client(cfg)
@@ -174,7 +190,12 @@ def run_campaign(
             'unsubscribe_url': u_url,
         }
         try:
-            plain, html = render_mod.render(body_file, ctx)
+            plain, html = render_mod.render(
+                body_file, ctx,
+                send_id=send_id,
+                api_base=cfg.get('api_base'),
+                mailer_secret=cfg.get('mailer_secret'),
+            )
             msg_id = send_one(r['email'], subject, plain, html, u_url, cfg, ses)
             db.log_send_item(send_id, r['email'], msg_id, 'sent')
             sent += 1

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>{{SUBJECT}}</title>
+<style>
+  /* Reset */
+  body, table, td, p, a { margin: 0; padding: 0; }
+  body { background-color: #f4f4f0; font-family: Arial, Helvetica, sans-serif; -webkit-text-size-adjust: 100%; }
+  img { border: 0; display: block; }
+  table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+
+  /* Main wrapper */
+  .wrapper { background-color: #f4f4f0; padding: 32px 16px; }
+
+  /* Card */
+  .card { background-color: #ffffff; max-width: 600px; margin: 0 auto; border-radius: 4px; overflow: hidden; }
+
+  /* Header */
+  .header { background-color: #1a1a2e; padding: 24px 40px; }
+  .header-wordmark { color: #ffffff; font-size: 15px; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; text-decoration: none; }
+  .header-label { color: #8899bb; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; margin-top: 4px; }
+
+  /* Body */
+  .body { padding: 40px 40px 32px; }
+  .greeting { font-size: 16px; color: #1a1a2e; margin-bottom: 20px; line-height: 1.5; }
+  .body-text { font-size: 16px; color: #2d2d2d; line-height: 1.7; margin-bottom: 16px; }
+  .body-text:last-of-type { margin-bottom: 0; }
+
+  /* Callout / excerpt block */
+  .callout { border-left: 3px solid #2c3e7a; padding: 12px 20px; margin: 24px 0; background-color: #f7f8fc; }
+  .callout p { font-size: 15px; color: #444; line-height: 1.7; font-style: italic; margin-bottom: 8px; }
+  .callout p:last-child { margin-bottom: 0; }
+
+  /* CTA button */
+  .cta-wrap { margin: 28px 0; }
+  .cta-btn { display: inline-block; background-color: #2c3e7a; color: #ffffff; font-size: 14px; font-weight: bold;
+             text-decoration: none; padding: 12px 24px; border-radius: 3px; letter-spacing: 0.04em; }
+
+  /* Inline link */
+  a.inline { color: #2c3e7a; text-decoration: underline; }
+
+  /* Sign-off */
+  .signoff { margin-top: 32px; padding-top: 24px; border-top: 1px solid #eee; }
+  .signoff p { font-size: 15px; color: #2d2d2d; line-height: 1.6; }
+  .signoff .name { font-weight: bold; margin-top: 8px; color: #1a1a2e; }
+
+  /* Footer */
+  .footer { background-color: #f0f0ec; padding: 20px 40px; border-top: 1px solid #e0e0dc; }
+  .footer p { font-size: 12px; color: #888; line-height: 1.6; text-align: center; }
+  .footer a { color: #666; text-decoration: underline; }
+
+  /* Mobile */
+  @media (max-width: 620px) {
+    .body { padding: 28px 24px 24px; }
+    .header { padding: 20px 24px; }
+    .footer { padding: 16px 24px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <table width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td>
+        <div class="card">
+
+          <!-- Header -->
+          <div class="header">
+            <div class="header-wordmark">Xavigate</div>
+            <div class="header-label">Practitioner Notes</div>
+          </div>
+
+          <!-- Body -->
+          <div class="body">
+
+            <p class="greeting">Hi {first_name},</p>
+
+            <!-- MAIN CONTENT GOES HERE -->
+            <!-- Use <p class="body-text"> for paragraphs -->
+            <!-- Use <div class="callout"><p>...</p></div> for excerpts or key passages -->
+            <!-- Use <div class="cta-wrap"><a href="URL" class="cta-btn">Link text</a></div> for one CTA -->
+
+            <p class="body-text">{{PARAGRAPH_1}}</p>
+            <p class="body-text">{{PARAGRAPH_2}}</p>
+
+            <!-- Optional callout block: -->
+            <!--
+            <div class="callout">
+              <p>{{EXCERPT}}</p>
+            </div>
+            -->
+
+            <!-- Optional CTA: -->
+            <!--
+            <div class="cta-wrap">
+              <a href="{{CTA_URL}}" class="cta-btn">{{CTA_TEXT}}</a>
+            </div>
+            -->
+
+            <!-- Sign-off -->
+            <div class="signoff">
+              <p>{{CLOSING_LINE}}</p>
+              <p class="name">Steven</p>
+            </div>
+
+          </div>
+
+          <!-- Footer -->
+          <div class="footer">
+            <p>
+              You're receiving this because you're an MN practitioner.<br>
+              <a href="{unsubscribe_url}">Unsubscribe</a> &nbsp;·&nbsp;
+              <a href="https://xavigate.com">xavigate.com</a>
+            </p>
+          </div>
+
+        </div>
+      </td>
+    </tr>
+  </table>
+</div>
+</body>
+</html>
