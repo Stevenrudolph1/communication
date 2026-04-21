@@ -1,11 +1,13 @@
 """send.py — SES email sender for XaviMail"""
 
+import datetime
 import hmac
 import hashlib
 import time
 import urllib.parse
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 
 import boto3
 from botocore.config import Config
@@ -216,6 +218,12 @@ def run_campaign(
     print()
 
     for i, r in enumerate(recipients, 1):
+        # Layer 2: per-recipient dedup — skip if already received in last 24h
+        if db.already_received(list_name, subject, r['email'], hours=24):
+            skipped += 1
+            print(f'  [{i}/{len(recipients)}] ⏭ {r["email"]}  (already received)')
+            continue
+
         u_url = unsub_url(r['email'], cfg)
         ctx = {
             'first_name': r['first_name'],
@@ -244,6 +252,14 @@ def run_campaign(
 
     print()
     print(f'Done. Sent: {sent}  |  Errors: {errors}  |  Suppressed: {suppressed_count}')
+
+    # Append to send register
+    if sent > 0:
+        register = Path(__file__).parent / 'emails' / 'SEND-REGISTER.md'
+        date = datetime.date.today().isoformat()
+        row = f'| {date} | {list_name} | {sent} | {subject} | {body_file} |\n'
+        with open(register, 'a') as f:
+            f.write(row)
 
     # Send one practitioner-style copy to each review address
     for copy_email in cfg.get('send_copy_to', []):

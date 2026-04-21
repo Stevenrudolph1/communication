@@ -310,6 +310,29 @@ def already_sent(send_id: int, email: str) -> bool:
     return row is not None
 
 
+def recent_send(list_name: str, subject: str, hours: int = 24) -> dict | None:
+    """Return the most recent send for this list+subject within the last N hours, or None."""
+    row = _db().execute("""
+        SELECT id, list_name, subject, sent_at, recipient_count
+        FROM sends
+        WHERE list_name = ? AND subject = ?
+          AND sent_at >= datetime('now', ?)
+        ORDER BY sent_at DESC LIMIT 1
+    """, (list_name, subject, f'-{hours} hours')).fetchone()
+    return dict(row) if row else None
+
+
+def already_received(list_name: str, subject: str, email: str, hours: int = 24) -> bool:
+    """True if this email already received this subject on this list within N hours."""
+    row = _db().execute("""
+        SELECT 1 FROM send_log sl
+        JOIN sends s ON s.id = sl.send_id
+        WHERE s.list_name = ? AND s.subject = ? AND sl.email = ?
+          AND s.sent_at >= datetime('now', ?)
+    """, (list_name, subject, email, f'-{hours} hours')).fetchone()
+    return row is not None
+
+
 # ── Sequence tracking ─────────────────────────────────────────────────────────
 
 def sequence_step_sent(sequence: str, step_num: int, list_name: str) -> dict | None:

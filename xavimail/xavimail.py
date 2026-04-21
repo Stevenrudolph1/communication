@@ -18,6 +18,8 @@ Usage:
 import sys
 import os
 import argparse
+import datetime
+import re
 from pathlib import Path
 
 # Add the xavimail directory to path so modules resolve
@@ -424,6 +426,15 @@ def cmd_send(args):
     if not Path(args.body).expanduser().exists():
         die(f'Body file not found: {args.body}')
 
+    # Enforce date+slug filename convention: YYYY-MM-DD-*.md
+    body_filename = Path(args.body).name
+    if not re.match(r'^\d{4}-\d{2}-\d{2}-.+\.md$', body_filename):
+        today = datetime.date.today().isoformat()
+        slug = re.sub(r'[^a-z0-9]+', '-', body_filename.replace('.md', '').lower()).strip('-')
+        die(f'Email file must be named YYYY-MM-DD-slug.md\n'
+            f'  Got:      {body_filename}\n'
+            f'  Suggest:  {today}-{slug}.md')
+
     is_live = not args.dry_run and not args.test_to
 
     # Guard: full list sends require --live flag + interactive confirmation
@@ -440,6 +451,16 @@ def cmd_send(args):
         sys.exit(1)
 
     if is_live and args.live:
+        # Layer 1: duplicate send guard
+        recent = db.recent_send(args.list, args.subject, hours=24)
+        if recent and not getattr(args, 'force', False):
+            print()
+            print('  🛑  DUPLICATE SEND BLOCKED')
+            print(f'     This subject was already sent to {args.list} on {recent["sent_at"]} ({recent["recipient_count"]} recipients).')
+            print(f'     Add --force to override.')
+            print()
+            sys.exit(1)
+
         # Count recipients before asking
         conn = db._db()
         count = conn.execute(
@@ -651,6 +672,8 @@ def main():
                         help='Send only to this address (test mode)')
     p_send.add_argument('--live',     action='store_true',
                         help='Required for full list sends — triggers confirmation prompt')
+    p_send.add_argument('--force',    action='store_true',
+                        help='Override duplicate send guard (use with caution)')
 
     # sync
     sub.add_parser('sync', help='Pull unsubscribes/bounces from D1 into local DB')
