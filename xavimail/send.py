@@ -73,6 +73,40 @@ def send_one(
     return resp['MessageId']
 
 
+def send_campaign_copy(
+    subject: str,
+    plain_text: str,
+    html_text: str,
+    list_name: str,
+    sent_count: int,
+    cfg: dict,
+    ses=None,
+) -> None:
+    """Send a single campaign copy to cc_always recipients after a live send."""
+    copy_addrs = cfg.get('cc_always', [])
+    if not copy_addrs:
+        return
+    if ses is None:
+        ses = _ses_client(cfg)
+
+    from_addr = f"{cfg['from_name']} <{cfg['from_email']}>"
+    copy_subject = f"[Campaign copy — {list_name}, {sent_count} sent] {subject}"
+
+    msg = MIMEMultipart('alternative')
+    msg['From']    = from_addr
+    msg['To']      = ', '.join(copy_addrs)
+    msg['Subject'] = copy_subject
+
+    msg.attach(MIMEText(plain_text, 'plain', 'utf-8'))
+    msg.attach(MIMEText(html_text,  'html',  'utf-8'))
+
+    ses.send_raw_email(
+        Source=from_addr,
+        Destinations=copy_addrs,
+        RawMessage={'Data': msg.as_bytes()},
+    )
+
+
 def run_campaign(
     list_name: str,
     subject: str,
@@ -210,4 +244,16 @@ def run_campaign(
 
     print()
     print(f'Done. Sent: {sent}  |  Errors: {errors}  |  Suppressed: {suppressed_count}')
+
+    # Send one practitioner-style copy to each review address
+    for copy_email in cfg.get('send_copy_to', []):
+        try:
+            u_url = unsub_url(copy_email, cfg)
+            ctx = {'first_name': 'Steven', 'last_name': '', 'email': copy_email, 'unsubscribe_url': u_url}
+            plain, html = render_mod.render(body_file, ctx)
+            msg_id = send_one(copy_email, subject, plain, html, u_url, cfg, ses)
+            print(f'Copy → {copy_email}')
+        except Exception as e:
+            print(f'Copy failed → {copy_email}: {e}')
+
     return {'sent': sent, 'skipped': skipped, 'suppressed': suppressed_count, 'errors': errors}

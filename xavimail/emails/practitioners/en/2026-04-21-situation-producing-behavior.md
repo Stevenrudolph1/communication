@@ -14,4 +14,21 @@ I've been paying more attention to what situations produce in people lately, not
 
 Full paper: https://doi.org/10.1038/s41598-025-09700-w
 
+---
+
+**Multiple Natures is out**
+
+My new book on MN. Short — most people finish it in one sitting. The goal was simple: anyone picks it up and gets the full gist of the framework. Good for clients who are ready to understand this more deeply. Includes theory I've continued to develop since the original work.
+
+xavigate.com/book-multiple-natures.html
+
+---
+
+**Become an MN Practitioner Trainer**
+
+The program is open. Starts with a self-paced module, then moves into direct apprenticeship with me.
+
+xavigate.com/training/mn-practitioner-trainer.html
+
+Best,
 Steven

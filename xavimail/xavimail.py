@@ -441,15 +441,15 @@ def cmd_send(args):
 
     if is_live and args.live:
         # Count recipients before asking
-        conn = db.get_connection()
+        conn = db._db()
         count = conn.execute(
             "SELECT COUNT(*) FROM list_members lm "
-            "JOIN subscribers s ON s.id = lm.subscriber_id "
-            "LEFT JOIN suppressions sup ON sup.email = s.email "
-            "WHERE lm.list_name = ? AND s.active = 1 AND sup.email IS NULL",
+            "JOIN lists l ON l.id = lm.list_id "
+            "JOIN subscribers s ON s.email = lm.email "
+            "LEFT JOIN suppressions sup ON sup.email = lm.email "
+            "WHERE l.name = ? AND s.status = 'active' AND lm.status = 'active' AND sup.email IS NULL",
             (args.list,)
         ).fetchone()[0]
-        conn.close()
         print()
         print(f'  ⚠️   LIVE SEND — {count} recipients on {args.list}')
         print(f'  Subject: {args.subject}')

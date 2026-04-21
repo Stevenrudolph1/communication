@@ -14,4 +14,21 @@ Je fais de plus en plus attention à ce que les situations produisent chez les g
 
 Article complet : https://doi.org/10.1038/s41598-025-09700-w
 
+---
+
+**Multiple Natures est sorti**
+
+Mon nouveau livre sur les NM. Court — la plupart des gens le finissent en une seule séance. L'objectif était simple : n'importe qui peut le lire et saisir l'essentiel du cadre. Idéal pour les clients prêts à comprendre ce travail plus en profondeur. Inclut une théorie que j'ai continué à développer depuis les travaux originaux.
+
+xavigate.com/fr/book-multiple-natures.html
+
+---
+
+**Devenez Formateur-Praticien MN**
+
+Le programme est ouvert. Commence par un module en autonomie, puis passe à un apprentissage directement avec moi.
+
+xavigate.com/fr/training/mn-practitioner-trainer.html
+
+Cordialement,
 Steven
