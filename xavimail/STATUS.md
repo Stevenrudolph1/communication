@@ -1,7 +1,31 @@
 # XaviMail — Status
 
-**Status:** Live  
-**Last updated:** 2026-04-19  
+**Status:** Live
+**Last updated:** 2026-05-04
+
+## Changelog
+
+### 2026-05-04 — Test-before-confirm gate tightened
+- `schedule confirm` now requires a matching `[TEST]` send for the same list+subject within the last 24 hours before practitioner jobs can be confirmed.
+- Test sends are logged under `test:<list>` so they cannot trip the production list cooldown.
+- `schedule run <id>` now performs the documented manual cooldown override while still keeping confirmation checks in place.
+- Partial scheduled sends are marked `partial` instead of `sent`, with TG notification showing sent/error counts.
+- Practitioner production lists require confirmation by default even when `~/.xavimail/confirm-required.txt` exists.
+
+### 2026-04-28 — Scheduling safeguards rebuilt (post-Dylan-incident)
+- **Incident:** A prior Claude session scheduled FR+EN Dylan newsletter at 23:57 local + ran confirm same session. Daemon fired 7am next morning. FR went to 110 practitioners unintentionally; EN crashed on SQLite threading bug.
+- **Fix A — threading:** `db.py` now uses per-thread connections (`threading.local()`). Daemon worker threads no longer share a connection.
+- **Fix B — confirmation TTL:** `daemon.py` `CONFIRMATION_TTL_HOURS=12`. Stale confirmations auto-blocked + TG alert + reset to `blocked-unconfirmed`.
+- **Fix C — TG notifications:** `tg_chat_id=1192545368` wired in `~/.xavimail/config.json`. Daemon now TGs send/fail/block.
+- **Fix D — morning digest:** `scheduler/digest.py`. Cron `0 6 * * *`. Lists next 24h queue with duplicate-day/unconfirmed/stale flags.
+- **Fix E — stale crontab:** removed `32 7 25 4 *` line that would re-fire next April.
+- **Layer 1 (schedule-time):** `cmd_schedule_add` refuses jobs that conflict with existing same-list-same-day. Override: `--allow-multi`.
+- **Layer 2 (fire-time):** Daemon refuses to fire if list sent within `LIST_COOLDOWN_HOURS=20`. Override: `schedule run <id>`.
+- **Layer 3 (digest):** Duplicate-day flag in morning TG digest.
+- **Documentation:** `~/.claude/CLAUDE.md` "XaviMail — Practitioner Email" section updated. New memory file `feedback_xavimail_scheduling_safeguards.md`. README `Scheduling — Safeguards` section.
+
+### 2026-04-19 — Initial deploy
+
 **Location:** `Projects/communication/xavimail/`  
 **CLI:** `xavimail` (symlinked to `~/bin/xavimail`)  
 **DB:** `~/.xavimail/xavimail.db` (local SQLite)  

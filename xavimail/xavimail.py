@@ -31,6 +31,11 @@ import render as render_mod
 import sync as sync_mod
 import send as send_mod
 import sequence as seq_mod
+from scheduler.cli import (
+    cmd_schedule_add, cmd_schedule_list, cmd_schedule_cancel,
+    cmd_schedule_run, cmd_schedule_confirm, cmd_schedule_daemon,
+)
+from scheduler.launchd import install_daemon, uninstall_daemon
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -482,9 +487,9 @@ def cmd_send(args):
             sys.exit(1)
         print()
 
-    # Auto-prefix [TEST] on test sends
+    # Auto-prefix [TEST] on test sends (also enforced in run_campaign — belt + suspenders)
     subject = args.subject
-    if args.test_to and not subject.startswith('[TEST]'):
+    if args.test_to and not subject.lstrip().upper().startswith('[TEST]'):
         subject = f'[TEST] {subject}'
 
     result = send_mod.run_campaign(
@@ -582,6 +587,28 @@ def cmd_sequence(args):
         print()
         print(f'─── Sending: sequence={args.name}  step={step_num} ───')
         seq_mod.send_step(seq, step_num, list_filter=args.list, dry_run=False)
+
+
+def cmd_schedule(args):
+    sub = getattr(args, 'sched_command', None)
+    if sub == 'add':
+        cmd_schedule_add(args)
+    elif sub == 'list':
+        cmd_schedule_list(args)
+    elif sub == 'cancel':
+        cmd_schedule_cancel(args)
+    elif sub == 'run':
+        cmd_schedule_run(args)
+    elif sub == 'confirm':
+        cmd_schedule_confirm(args)
+    elif sub == 'daemon':
+        cmd_schedule_daemon(args)
+    elif sub == 'install-daemon':
+        install_daemon()
+    elif sub == 'uninstall-daemon':
+        uninstall_daemon()
+    else:
+        print('Usage: xavimail schedule <add|list|cancel|run|confirm|daemon|install-daemon|uninstall-daemon>')
 
 
 def cmd_stats(args):
@@ -698,6 +725,37 @@ def main():
     p_ssend.add_argument('--dry-run', action='store_true', help='Preview only')
     p_ssend.add_argument('--confirm', action='store_true', help='Skip the y/N prompt')
 
+    # schedule
+    p_sched = sub.add_parser('schedule', help='Schedule future sends')
+    sched_sub = p_sched.add_subparsers(dest='sched_command', metavar='subcommand')
+
+    p_sadd = sched_sub.add_parser('add', help='Schedule a send')
+    p_sadd.add_argument('list',    help='List name, e.g. practitioners-en')
+    p_sadd.add_argument('subject', help='Email subject line')
+    p_sadd.add_argument('draft',   nargs='?', default=None,
+                        help='Path to .md email file (omit to use latest draft in drafts/)')
+    p_sadd.add_argument('--at',    required=True, metavar='DATETIME',
+                        help='Send time, e.g. "2026-04-25 14:30"')
+    p_sadd.add_argument('--tz',    default='Asia/Phnom_Penh', metavar='TZ',
+                        help='Timezone (default: Asia/Phnom_Penh)')
+    p_sadd.add_argument('--allow-multi', action='store_true', dest='allow_multi',
+                        help='Override one-send-per-list-per-day guard (rare)')
+
+    sched_sub.add_parser('list', help='Show all scheduled jobs')
+
+    p_scancel = sched_sub.add_parser('cancel', help='Cancel a pending job')
+    p_scancel.add_argument('job_id', help='Job ID from schedule list')
+
+    p_srun = sched_sub.add_parser('run', help='Force-run a job now (recovery)')
+    p_srun.add_argument('job_id', help='Job ID from schedule list')
+
+    p_sconfirm = sched_sub.add_parser('confirm', help='Confirm a job so the daemon will fire it')
+    p_sconfirm.add_argument('job_id', help='Job ID from schedule list')
+
+    sched_sub.add_parser('daemon', help='Start the scheduler daemon (blocking)')
+    sched_sub.add_parser('install-daemon', help='Install macOS LaunchAgent (auto-start)')
+    sched_sub.add_parser('uninstall-daemon', help='Remove LaunchAgent and stop daemon')
+
     # stats
     sub.add_parser('stats', help='Send history and suppression counts')
 
@@ -720,6 +778,7 @@ def main():
         'send':     cmd_send,
         'sync':     cmd_sync,
         'sequence': cmd_sequence,
+        'schedule': cmd_schedule,
         'stats':    cmd_stats,
     }
 

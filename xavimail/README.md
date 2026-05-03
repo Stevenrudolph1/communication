@@ -29,6 +29,55 @@ xavimail sync                                           # pull unsubscribes/boun
 xavimail stats                                          # send history + suppression counts
 ```
 
+## Scheduling — Safeguards (post-2026-04-28 incident)
+
+The scheduler has **four layers of protection** against accidental duplicate or premature sends. All run automatically; do not disable.
+
+### Layer 1 — schedule-time guard
+At `xavimail schedule add`, refuses to add a job if the same list already has a job scheduled on the same local day (any subject, any status except cancelled/failed).
+- Override: `--allow-multi`. Use rarely; requires conscious choice.
+
+### Layer 2 — fire-time guard (per-list cooldown)
+At fire time, the daemon refuses to deliver if the list received any send within the last **20 hours**. Job marked `failed` with cooldown reason; TG alert sent.
+- Override: `xavimail schedule run <id>` (only after manual review).
+
+### Layer 3 — confirmation TTL
+Confirmations expire after **12 hours**. A job confirmed long before its fire time will be auto-blocked and require re-confirmation.
+- Practitioner jobs also require a matching `[TEST]` send for the same list and subject within the previous **24 hours** before `xavimail schedule confirm <job_id>` will proceed.
+- Reason: prevents the "schedule + confirm at midnight, fire at 7am with no re-check" pattern.
+
+### Layer 4 — morning digest
+Cron at 6am local sends a Telegram message listing the next 24h queue. Flags duplicate-day jobs (`⚠ DUPLICATE DAY`), unconfirmed jobs (`⛔ UNCONFIRMED`), and stale confirmations (`⚠ STALE`).
+- Cron: `0 6 * * *` → `python3 -m scheduler.digest`
+- Manual run: `cd /Users/stevenrudolph/Projects/communication/xavimail && /opt/homebrew/bin/python3 -m scheduler.digest --stdout`
+
+### Standard scheduling workflow
+
+```bash
+# 1. Test-to yourself first (never trust an untested draft)
+xavimail send practitioners-en "Subject" draft.md --test-to steven@multiplenatures.com
+
+# 2. Schedule (does not require confirmation yet)
+xavimail schedule add practitioners-en "Subject" draft.md \
+    --at "2026-05-02 09:00" --tz Asia/Phnom_Penh
+
+# 3. Morning of (within 12h of fire time): confirm
+# Requires the matching [TEST] send above within the last 24h.
+xavimail schedule confirm <job_id>
+# → daemon fires automatically at the scheduled time
+```
+
+### TG notification channel
+
+- Bot token: `~/.secrets/xavigate-debug-bot.env` (BOT_TOKEN line)
+- Chat ID: `~/.xavimail/config.json` → `tg_chat_id`
+- Sends: send-complete, send-failed, blocked-unconfirmed, stale-confirmation, cooldown-blocked, morning digest.
+- If TG goes silent: investigate, do not paper over.
+
+### Incident origin
+
+**2026-04-28** — A prior Claude session scheduled the Bob Dylan newsletter (FR + EN) at 23:57 local AND ran `schedule confirm` in the same session. Daemon fired at 7am next morning. FR went to 110 practitioners unintentionally; EN crashed on a SQLite threading bug (since fixed). Three new safeguard layers + the 12h TTL prevent recurrence. See `~/.claude/CLAUDE.md` "XaviMail — Practitioner Email" section for the rules every Claude session must follow.
+
 ## Lists
 
 | List | Segments from contacts.json | Description |

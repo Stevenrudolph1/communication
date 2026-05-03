@@ -2,23 +2,34 @@
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 import config as cfg_mod
 
-_conn = None
+# Per-thread connection store. SQLite connections cannot be shared across
+# threads, so the daemon (which fires jobs in worker threads) must get its
+# own connection per thread. See incident 2026-04-28 EN newsletter failure.
+_local = threading.local()
+_init_lock = threading.Lock()
+_initialized = False
 
 def _db() -> sqlite3.Connection:
-    global _conn
-    if _conn is None:
+    global _initialized
+    conn = getattr(_local, 'conn', None)
+    if conn is None:
         cfg = cfg_mod.load()
-        db_path = Path(cfg['db_path'])
+        db_path = Path(cfg['db_path']).expanduser()
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        _conn = sqlite3.connect(str(db_path))
-        _conn.row_factory = sqlite3.Row
-        _conn.execute('PRAGMA journal_mode=WAL')
-        _conn.execute('PRAGMA foreign_keys=ON')
-        init(_conn)
-    return _conn
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA foreign_keys=ON')
+        _local.conn = conn
+        with _init_lock:
+            if not _initialized:
+                init(conn)
+                _initialized = True
+    return conn
 
 
 def init(conn: sqlite3.Connection):
@@ -322,12 +333,47 @@ def recent_send(list_name: str, subject: str, hours: int = 24) -> dict | None:
     return dict(row) if row else None
 
 
+def recent_test_send(list_name: str, subject: str, hours: int = 24) -> dict | None:
+    """Return the latest matching test send for this list+subject."""
+    test_subject = subject if subject.lstrip().upper().startswith('[TEST]') else f'[TEST] {subject}'
+    row = _db().execute("""
+        SELECT id, list_name, subject, body_file, sent_at, recipient_count
+        FROM sends
+        WHERE list_name IN (?, ?)
+          AND subject = ?
+          AND recipient_count = 1
+          AND sent_at >= datetime('now', ?)
+        ORDER BY sent_at DESC LIMIT 1
+    """, (list_name, f'test:{list_name}', test_subject, f'-{hours} hours')).fetchone()
+    return dict(row) if row else None
+
+
+def last_send_for_list(list_name: str, hours: int = 20, min_recipients: int = 2) -> dict | None:
+    """
+    Return the most recent BULK send to this list (recipient_count >= min_recipients)
+    within the last N hours. Used by the daemon to enforce a per-list cooldown before
+    firing. Single-recipient sends (test-to) are excluded so a test does not block the
+    subsequent live send to the same list.
+    """
+    row = _db().execute("""
+        SELECT id, list_name, subject, sent_at, recipient_count
+        FROM sends
+        WHERE list_name = ?
+          AND sent_at >= datetime('now', ?)
+          AND recipient_count >= ?
+          AND subject NOT LIKE '[TEST]%'
+        ORDER BY sent_at DESC LIMIT 1
+    """, (list_name, f'-{hours} hours', min_recipients)).fetchone()
+    return dict(row) if row else None
+
+
 def already_received(list_name: str, subject: str, email: str, hours: int = 24) -> bool:
     """True if this email already received this subject on this list within N hours."""
     row = _db().execute("""
         SELECT 1 FROM send_log sl
         JOIN sends s ON s.id = sl.send_id
         WHERE s.list_name = ? AND s.subject = ? AND sl.email = ?
+          AND sl.status = 'sent'
           AND s.sent_at >= datetime('now', ?)
     """, (list_name, subject, email, f'-{hours} hours')).fetchone()
     return row is not None

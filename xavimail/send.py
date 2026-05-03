@@ -132,6 +132,13 @@ def run_campaign(
     if not lst:
         raise ValueError(f"List '{list_name}' not found. Run 'xavimail lists' to see available lists.")
 
+    # Defense in depth: ANY test-to send must carry [TEST] in the subject.
+    # Enforced here so every caller (cmd_send, cmd_test, sequence, ad-hoc scripts)
+    # gets the prefix automatically. Origin: 2026-04-28 — test-to sends went out
+    # without [TEST] and got mistaken for live sends.
+    if test_to and not subject.lstrip().upper().startswith('[TEST]'):
+        subject = f'[TEST] {subject}'
+
     if test_to:
         # Single test send — log it so tracking works in the test email
         u_url = unsub_url(test_to, cfg)
@@ -149,7 +156,7 @@ def run_campaign(
             print(plain[:800])
             return {'sent': 0, 'skipped': 0, 'suppressed': 0, 'errors': 0}
         test_send_id = db.log_send(
-            list_name=list_name, subject=subject, body_file=body_file,
+            list_name=f'test:{list_name}', subject=subject, body_file=body_file,
             recipient_count=1, skipped_count=0,
             sequence=sequence, step_num=step_num,
         )
@@ -209,6 +216,9 @@ def run_campaign(
         step_num=step_num,
     )
 
+    seen_emails = set()
+    recipients = [r for r in recipients if not (r['email'] in seen_emails or seen_emails.add(r['email']))]
+
     ses = _ses_client(cfg)
     delay = cfg.get('send_delay_seconds', 0.1)
     sent = skipped = errors = 0
@@ -261,7 +271,13 @@ def run_campaign(
         with open(register, 'a') as f:
             f.write(row)
 
-    # Send one practitioner-style copy to each review address
+    # Send one practitioner-style copy to each review address (real practitioner lists only)
+    is_practitioner_list = (
+        list_name.startswith('practitioners-') or
+        (list_name.startswith('newsletter-') and 'practitioners' in list_name)
+    )
+    if not is_practitioner_list:
+        return {'sent': sent, 'skipped': skipped, 'suppressed': suppressed_count, 'errors': errors}
     for copy_email in cfg.get('send_copy_to', []):
         try:
             u_url = unsub_url(copy_email, cfg)
