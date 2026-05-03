@@ -29,3 +29,15 @@ Thumbs.db
 tmp/
 temp/
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# XaviMail runtime (SQLite job store + generated drafts/scheduler artifacts)
+*.db
+*.sqlite
+*.sqlite3
+xavimail/drafts/
+xavimail/scheduler/
+
